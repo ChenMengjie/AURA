@@ -13,6 +13,14 @@ AURA (Analysis of microenvironmental Regulatory Activity) tests whether gene exp
 - **Effect decomposition** — per-gene beta vectors decomposed by SVD into principal composition modes
 - **Variance decomposition** — partitions gene variance into baseline NB, library-size (alpha), composition (beta), and unexplained components
 
+## Tutorials
+
+| Dataset | Notebook | Description |
+|---------|----------|-------------|
+| **Human Lymph Node** (Xenium 5K, 702K cells, 4624 genes) | [`tutorial_lymphnode.ipynb`](tutorials/tutorial_lymphnode.ipynb) | Single-sample mode, Tfh + Macrophage focal types, SVD interpretation, gene zoom, cross-focal comparison |
+| **IPF Lung** (Xenium custom, 1.6M cells, 343 genes) | [`tutorial_ipf.ipynb`](tutorials/tutorial_ipf.ipynb) | Multi-sample mode (45 TMA cores), beta heatmap, data-driven spillover detection, distance-decay validation |
+| **NSCLC** (CosMx 1K, 766K cells, 960 genes) | [`tutorial_nsclc.ipynb`](tutorials/tutorial_nsclc.ipynb) | Multi-sample mode, tumor microenvironment, cross-focal driver comparison, spillover filter at intermediate suspect rate |
+
 ## Installation
 
 ```bash
@@ -189,23 +197,6 @@ The beta matrix is decomposed by SVD to identify principal composition modes —
 | Sample labels | `adata.obs` column | Required for multi-sample mode only |
 
 The composition column (`type_column`) defines the axes of the composition kernel — typically 10-15 lineage-level groups. The focal cell column (`label_column`) can be a finer annotation used to select the specific cell population to analyze.
-
-## Tutorials
-
-Reproducible notebooks demonstrating AURA on three spatial transcriptomics datasets from the manuscript.
-
-| Dataset | Notebook | Description |
-|---------|----------|-------------|
-| **Human Lymph Node** (Xenium 5K, 702K cells, 4624 genes) | [`tutorial_lymphnode.ipynb`](tutorials/tutorial_lymphnode.ipynb) | Single-sample mode, Tfh + Macrophage focal types, SVD interpretation, gene zoom, cross-focal comparison |
-| **IPF Lung** (Xenium custom, 1.6M cells, 343 genes) | [`tutorial_ipf.ipynb`](tutorials/tutorial_ipf.ipynb) | Multi-sample mode (45 TMA cores), beta heatmap, data-driven spillover detection, distance-decay validation |
-| **NSCLC** (CosMx 1K, 766K cells, 960 genes) | [`tutorial_nsclc.ipynb`](tutorials/tutorial_nsclc.ipynb) | Multi-sample mode, tumor microenvironment, cross-focal driver comparison, spillover filter at intermediate suspect rate |
-
-Each notebook includes:
-- Data loading and composition-group mapping
-- AURA analysis with full diagnostics (QQ plots, variance decomposition)
-- Beta heatmap with spillover annotation (IPF, NSCLC tutorials)
-- SVD result panel with principal composition modes
-- Cross-focal comparison of context-responsive gene programs
 
 ## Citation
 
