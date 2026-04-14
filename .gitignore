@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Environments
+.venv/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# pytest
+.pytest_cache/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# OS
+.DS_Store
+
+# Tutorial outputs (unexecuted source notebooks are tracked)
+tutorials/results/
+tutorials/*_unexecuted.ipynb
