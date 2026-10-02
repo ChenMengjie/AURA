@@ -292,7 +292,6 @@ def spillover_flags(df, canonical, focal_lin, type_names, P_sd=None,
     bcols = [f"beta_{t}" for t in type_names]
     own = canonical.get(focal_lin, set()) if own_markers is None else own_markers
     names = np.array(type_names)
-    B = np.abs(df[bcols].values)
 
     def flag(driver):
         return np.array([
@@ -300,17 +299,11 @@ def spillover_flags(df, canonical, focal_lin, type_names, P_sd=None,
             for g, d, sig in zip(df["gene"], driver, df["significant"])
         ])
 
+    from aura.spillover import driver_axes
     df = df.copy()
-    raw = names[B.argmax(axis=1)]
-    if P_sd is not None:
-        # spillover means a POSITIVE association with the source lineage;
-        # with compositions summing to one, the largest |beta| can be a
-        # negative coefficient on the dominant lineage instead
-        C = df[bcols].values * np.asarray(P_sd)[None, :]
-        pos = C.max(axis=1) > 0
-        std = np.where(pos, names[C.argmax(axis=1)], names[np.abs(C).argmax(axis=1)])
-    else:
-        std = raw
+    raw = names[driver_axes(df[bcols].values, method="abs_beta")[0]]
+    std = names[driver_axes(df[bcols].values, P_sd, "contribution")[0]] \
+        if P_sd is not None else raw
     df["driver_axis_raw"], df["spillover_suspect_raw"] = raw, flag(raw)
     df["driver_axis"], df["spillover_suspect"] = std, flag(std)
     if lineage_means is not None and focal_means is not None:

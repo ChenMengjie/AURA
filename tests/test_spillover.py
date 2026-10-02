@@ -358,3 +358,75 @@ def test_canonical_lymphnode_has_ln_groups():
     expected = {'B', 'GC_B', 'T_conv', 'Tfh', 'Treg', 'Mac', 'FDC', 'Endo',
                 'Stromal'}
     assert expected == set(CANONICAL_LYMPHNODE.keys())
+
+
+# ─────────────────────────────────────────────────────────────────────
+# driver_axes (contribution rule)
+# ─────────────────────────────────────────────────────────────────────
+
+def test_driver_axes_ignores_rare_axis():
+    """A rare neighbor type has a huge, noisy beta but almost no variation in
+    local fraction; the contribution rule must not pick it."""
+    from aura.spillover import driver_axes
+    beta = np.array([[0.8, 0.0, 40.0]])      # axis 2: rare type
+    sd = np.array([0.20, 0.10, 0.001])
+    assert driver_axes(beta, method="abs_beta")[0][0] == 2
+    idx, contrib = driver_axes(beta, sd)
+    assert idx[0] == 0
+    assert contrib[0] == pytest.approx(0.16)
+
+
+def test_driver_axes_prefers_positive_contribution():
+    """With compositions summing to one, a source lineage can appear as a
+    large negative coefficient on the dominant lineage; spillover drivers
+    must be positive associations."""
+    from aura.spillover import driver_axes
+    beta = np.array([[-3.0, 1.5, 0.2],       # 'tumor' negative, 'fibro' positive
+                     [-1.0, -2.0, -0.5]])    # no positive contribution
+    sd = np.array([0.3, 0.2, 0.2])
+    idx, contrib = driver_axes(beta, sd)
+    assert idx[0] == 1
+    assert idx[1] == 1                       # no positive: largest |contribution| (-0.4)
+    assert contrib[1] < 0
+
+
+def test_driver_axes_requires_sd():
+    from aura.spillover import driver_axes
+    with pytest.raises(ValueError):
+        driver_axes(np.ones((2, 3)))
+
+
+def test_spillover_filter_uses_composition_sd(tmp_path):
+    """End to end: a marker of a common lineage with modest beta is flagged,
+    although a rare lineage has the largest |beta|; the same holds when
+    reading a saved CSV (sdP_* columns)."""
+    from aura.io import save_results
+    from aura.spillover import spillover_filter
+    rng = np.random.default_rng(0)
+    n = 500
+    P = np.column_stack([rng.uniform(0, 0.6, n), np.zeros(n), np.zeros(n)])
+    P[:5, 2] = 0.05                          # rare lineage C
+    P[:, 1] = 1 - P[:, 0] - P[:, 2]
+    beta = np.array([[2.0, 0.0, 60.0],       # GENE1: driver A by contribution
+                     [0.1, 0.0, 0.1]])
+    res = dict(significant=np.array([True, True]),
+               has_excess=np.array([True, True]),
+               R2_total=np.array([0.1, 0.01]), R2=np.array([0.1, 0.01]),
+               total_var=np.ones(2), baseline_var=np.ones(2),
+               excess_var=np.ones(2), Q=np.ones(2),
+               pvalues=np.array([1e-4, 1e-3]), qvalues=np.array([1e-3, 1e-2]),
+               beta=beta, P=P)
+    canonical = {'A': {'GENE1'}, 'B': set(), 'C': set()}
+    path = tmp_path / 'r.csv'
+    save_results(path, np.array(['GENE1', 'GENE2']), res, ['A', 'B', 'C'])
+
+    out = spillover_filter(csv_path=path, canonical=canonical,
+                           focal_lineage='B').set_index('gene')
+    assert out.loc['GENE1', 'driver_axis'] == 'A'
+    assert out.loc['GENE1', 'driver_axis_abs_beta'] == 'C'
+    assert bool(out.loc['GENE1', 'spillover_suspect'])
+
+    legacy = spillover_filter(csv_path=path, canonical=canonical,
+                              focal_lineage='B', driver='abs_beta').set_index('gene')
+    assert legacy.loc['GENE1', 'driver_axis'] == 'C'
+    assert not bool(legacy.loc['GENE1', 'spillover_suspect'])

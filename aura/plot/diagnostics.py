@@ -468,6 +468,9 @@ def variance_summary(result=None, csv_path=None, focal_name=""):
         })
         for i, name in enumerate(result.type_names):
             df[f"beta_{name}"] = result.beta[:, i]
+        if result.P is not None and result.beta.shape[1] == len(result.type_names):
+            for name, sd in zip(result.type_names, np.asarray(result.P).std(axis=0)):
+                df[f"sdP_{name}"] = sd
     else:
         raise ValueError("Provide either result or csv_path")
 
@@ -527,11 +530,18 @@ def variance_summary(result=None, csv_path=None, focal_name=""):
     lines.append(f"{'─'*15:15s} {'─'*8:>8s} {'─'*9:>9s} "
                  f"{'─'*7:>7s} {'─'*6:>6s} {'─'*20}")
     sig_idx = np.where(sig)[0]
+    from ..spillover import driver_axes
+    sd_cols = [f"sdP_{a}" for a in axis_names]
+    if all(c in df.columns for c in sd_cols):
+        drivers, _ = driver_axes(df[beta_cols].values,
+                                 df[sd_cols].iloc[0].values, "contribution")
+    else:
+        drivers, _ = driver_axes(df[beta_cols].values, method="abs_beta")
     if len(sig_idx) > 0:
         top = sig_idx[np.argsort(r2_total[sig_idx])[::-1][:10]]
         for i in top:
             betas = [df[c].iloc[i] for c in beta_cols]
-            driver = np.argmax(np.abs(betas))
+            driver = drivers[i]
             sign = '+' if betas[driver] > 0 else '-'
             lines.append(
                 f"{gene_names[i]:15s} {r2_total[i]:7.1%} "
@@ -544,9 +554,7 @@ def variance_summary(result=None, csv_path=None, focal_name=""):
     if len(sig_idx) > 0:
         axis_counts = {a: 0 for a in axis_names}
         for i in sig_idx:
-            betas = [df[c].iloc[i] for c in beta_cols]
-            driver = np.argmax(np.abs(betas))
-            axis_counts[axis_names[driver]] += 1
+            axis_counts[axis_names[drivers[i]]] += 1
         for a, cnt in sorted(axis_counts.items(), key=lambda x: -x[1]):
             if cnt > 0:
                 lines.append(f"  {a:15s}: {cnt:3d} genes "

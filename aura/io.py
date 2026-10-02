@@ -142,6 +142,11 @@ def save_results(path, gene_names, result, type_names):
 
     beta = result["beta"]
     n_blocks = beta.shape[1] // len(type_names)
+    if result.get("P") is not None and n_blocks == 1:
+        # per-axis SD of composition (constant columns), used by
+        # spillover_filter(csv_path=...) to rank driver axes
+        for name, sd in zip(type_names, np.asarray(result["P"]).std(axis=0)):
+            df[f"sdP_{name}"] = sd
     for j in range(n_blocks):
         suffix = "" if n_blocks == 1 else f"_ring{j}"
         for i, name in enumerate(type_names):

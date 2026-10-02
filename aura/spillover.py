@@ -22,6 +22,7 @@ import pandas as pd
 log = logging.getLogger(__name__)
 
 __all__ = [
+    "driver_axes",
     "learn_canonical",
     "query_gene",
     "spillover_filter",
@@ -93,6 +94,42 @@ CANONICAL_LYMPHNODE = {
     "Stromal":  {"COL1A1", "COL3A1", "DCN", "LUM"},
 }
 
+
+
+def driver_axes(beta, axis_sd=None, method="contribution"):
+    """Dominant neighbor axis for each gene.
+
+    Args:
+        beta: (n_genes, K) composition coefficients
+        axis_sd: (K,) standard deviation of each composition axis across the
+            focal cells; required for method='contribution'
+        method:
+            'contribution' (default): the axis with the largest positive
+                contribution beta_k * sd(P_k), i.e. the neighbor type whose
+                observed range of local fraction raises expression most;
+                genes with no positive contribution take the largest
+                |beta_k * sd(P_k)|.
+            'abs_beta': argmax |beta_k| (v0.1 rule). Biased toward rare
+                neighbor types, whose fractions barely vary and whose
+                coefficients are large and noisy, and can select a negative
+                coefficient on the dominant type (compositions sum to one).
+
+    Returns:
+        idx: (n_genes,) driver axis index
+        contribution: (n_genes,) beta * sd at the driver (beta for abs_beta)
+    """
+    beta = np.atleast_2d(np.asarray(beta, dtype=float))
+    rows = np.arange(beta.shape[0])
+    if method == "abs_beta":
+        idx = np.abs(beta).argmax(axis=1)
+        return idx, beta[rows, idx]
+    if method != "contribution":
+        raise ValueError(f"Unknown driver method: {method!r}")
+    if axis_sd is None:
+        raise ValueError("method='contribution' requires axis_sd")
+    C = beta * np.asarray(axis_sd, dtype=float)[None, :]
+    idx = np.where(C.max(axis=1) > 0, C.argmax(axis=1), np.abs(C).argmax(axis=1))
+    return idx, C[rows, idx]
 
 def learn_canonical(adata, type_column, gene_names=None,
                     min_fold=2.0, min_detection=0.05):
@@ -251,11 +288,12 @@ def query_gene(gene_name, canonical=None, adata=None, type_column=None):
 
 def spillover_filter(result=None, csv_path=None, gene_names=None,
                      focal_lineage=None, canonical=None,
-                     type_names=None):
+                     type_names=None, driver="contribution", axis_sd=None):
     """Flag significant genes as spillover-suspect or clean.
 
     A gene is spillover-suspect if:
-      1. Its driver axis (max |β|) has the gene in its canonical marker set
+      1. Its driver axis (see `driver_axes`) has the gene in its canonical
+         marker set
       2. The gene is NOT a canonical marker of the focal cell's own lineage
 
     Args:
@@ -270,10 +308,17 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
         canonical: dict mapping composition group names to sets of canonical
                    marker gene names. Defaults to DEFAULT_CANONICAL.
         type_names: list of composition axis names. Required if csv_path is used.
+        driver: 'contribution' (default) or 'abs_beta' (v0.1); see
+                `driver_axes`.
+        axis_sd: (K,) SD of each composition axis over the focal cells.
+                 Taken from result.P or from the CSV's sdP_* columns when
+                 not given; if unavailable, falls back to 'abs_beta' with a
+                 warning.
 
     Returns:
         DataFrame with columns:
             gene, significant, R2_total, driver_axis, beta_driver,
+            contribution_driver, driver_axis_abs_beta, qvalue,
             spillover_suspect, reason
         Only includes significant genes. Sorted by R2_total descending.
     """
@@ -288,6 +333,8 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
         tnames = result.type_names
         r2_total = result.R2_total
         qvalues = result.qvalues
+        if axis_sd is None and getattr(result, "P", None) is not None:
+            axis_sd = np.asarray(result.P).std(axis=0)
     elif csv_path is not None:
         df = pd.read_csv(csv_path)
         beta_cols = [c for c in df.columns if c.startswith('beta_')]
@@ -297,8 +344,22 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
         genes = df['gene'].values if gene_names is None else gene_names
         r2_total = df['R2_total'].values
         qvalues = df['qvalue'].values
+        sd_cols = [f"sdP_{t}" for t in tnames]
+        if axis_sd is None and all(c in df.columns for c in sd_cols):
+            axis_sd = df[sd_cols].iloc[0].values.astype(float)
     else:
         raise ValueError("Provide either result or csv_path")
+
+    tnames = list(tnames)
+    if beta.shape[1] != len(tnames):
+        n_blocks = beta.shape[1] // len(tnames)
+        tnames = [f"{t}_ring{j}" for j in range(n_blocks) for t in tnames]
+    if driver == "contribution" and axis_sd is None:
+        log.warning("spillover_filter: composition SDs unavailable; using the "
+                    "v0.1 abs_beta driver rule")
+        driver = "abs_beta"
+    drv_idx, drv_contrib = driver_axes(beta, axis_sd, method=driver)
+    abs_idx, _ = driver_axes(beta, method="abs_beta")
 
     # Focal cell's own markers (never flagged)
     own = set()
@@ -313,24 +374,26 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
     rows = []
     for i in sig_idx:
         gene = genes[i]
-        betas = beta[i]
-        driver_idx = np.argmax(np.abs(betas))
-        driver = tnames[driver_idx]
-        beta_val = betas[driver_idx]
+        driver_idx = drv_idx[i]
+        driver_name = tnames[driver_idx]
+        lineage = driver_name.split("_ring")[0]
+        beta_val = beta[i, driver_idx]
 
         suspect = False
         reason = ""
-        if driver in canonical and gene in canonical[driver]:
+        if lineage in canonical and gene in canonical[lineage]:
             if gene not in own:
                 suspect = True
-                reason = f"{gene} is canonical marker of {driver}"
+                reason = f"{gene} is canonical marker of {lineage}"
 
         rows.append({
             'gene': gene,
             'significant': True,
             'R2_total': r2_total[i],
-            'driver_axis': driver,
+            'driver_axis': driver_name,
             'beta_driver': beta_val,
+            'contribution_driver': drv_contrib[i],
+            'driver_axis_abs_beta': tnames[abs_idx[i]],
             'qvalue': qvalues[i],
             'spillover_suspect': suspect,
             'reason': reason,
@@ -346,7 +409,8 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
     return out
 
 
-def spillover_filter_multi(focals, canonical=None, type_names=None):
+def spillover_filter_multi(focals, canonical=None, type_names=None,
+                           driver="contribution"):
     """Run `spillover_filter` across multiple focal types and concatenate.
 
     Convenience wrapper for the common pattern in disease/multi-tissue
@@ -367,6 +431,7 @@ def spillover_filter_multi(focals, canonical=None, type_names=None):
         type_names: optional list of composition axis names. Required only
             if any source is a CSV path that doesn't follow the
             `beta_<group>` column convention.
+        driver: driver rule passed to `spillover_filter`.
 
     Returns:
         Single DataFrame with all significant rows from every focal type
@@ -387,17 +452,20 @@ def spillover_filter_multi(focals, canonical=None, type_names=None):
         if isinstance(source, str):
             df_focal = spillover_filter(
                 csv_path=source, focal_lineage=focal_lineage,
-                canonical=canonical, type_names=type_names)
+                canonical=canonical, type_names=type_names, driver=driver)
         else:
             df_focal = spillover_filter(
-                result=source, focal_lineage=focal_lineage, canonical=canonical)
+                result=source, focal_lineage=focal_lineage, canonical=canonical,
+                driver=driver)
         df_focal = df_focal.copy()
         df_focal['focal_type'] = focal_name
         parts.append(df_focal)
 
     if not parts:
         return pd.DataFrame(columns=['gene', 'significant', 'R2_total',
-                                     'driver_axis', 'beta_driver', 'qvalue',
+                                     'driver_axis', 'beta_driver',
+                                     'contribution_driver',
+                                     'driver_axis_abs_beta', 'qvalue',
                                      'spillover_suspect', 'reason',
                                      'focal_type'])
 

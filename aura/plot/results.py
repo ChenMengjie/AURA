@@ -242,8 +242,13 @@ def gene_zoom_panel(gene_name, result, all_xy=None, bg_masks=None,
     beta_names = axis_names
     r2_total = result.R2_total[gene_row_idx]
 
-    # Top driver axes by |beta|
-    driver_order = np.argsort(np.abs(betas))[::-1][:n_drivers]
+    # Top driver axes by contribution |beta_k| * sd(P_k): the expression
+    # change across the observed range of each axis (raw |beta| favours
+    # rare neighbor types)
+    if getattr(result, 'P', None) is not None and len(betas) == result.P.shape[1]:
+        driver_order = np.argsort(np.abs(betas) * result.P.std(axis=0))[::-1][:n_drivers]
+    else:
+        driver_order = np.argsort(np.abs(betas))[::-1][:n_drivers]
 
     n_rows = 1 + n_drivers
     fig = plt.figure(figsize=(18, 5 * n_rows))
