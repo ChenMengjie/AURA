@@ -15,6 +15,12 @@ from scipy.stats import kstest, spearmanr
 from ._style import VARIANCE_COLORS as _COLORS
 
 
+
+def _phi_label(phi):
+    if np.ndim(phi) == 0:
+        return f"{float(phi):.2f}"
+    return f"gene, median {float(np.median(phi)):.2f}"
+
 def diagnostic_panel(result, title="AURA Diagnostic", out_path=None):
     """Standard 8-panel diagnostic figure.
 
@@ -59,8 +65,12 @@ def diagnostic_panel(result, title="AURA Diagnostic", out_path=None):
     # (a) Mean-variance fit
     ax = fig.add_subplot(gs[0, 0])
     ax.scatter(mu, s2, s=3, alpha=0.3, c='#4878CF')
-    mu_s = np.sort(mu[mu > 0])
-    ax.plot(mu_s, mu_s + mu_s ** 2 / phi, 'r-', lw=2, label=f'NB(phi={phi:.1f})')
+    order = np.argsort(mu)
+    order = order[mu[order] > 0]
+    mu_s = mu[order]
+    phi_s = phi if np.ndim(phi) == 0 else np.asarray(phi)[order]
+    ax.plot(mu_s, mu_s + mu_s ** 2 / phi_s, 'r-', lw=2,
+            label=f'NB(phi={_phi_label(phi)})')
     ax.plot(mu_s, mu_s, 'k--', lw=1, alpha=0.5, label='Poisson')
     ax.set_xlabel('Gene mean'); ax.set_ylabel('Gene variance')
     ax.set_title('(a) Mean-variance fit', fontsize=10)
@@ -405,7 +415,7 @@ def variance_panel(result, title="AURA Variance Decomposition", out_path=None):
     lines = [
         f"Genes tested:    {n_genes}",
         f"Significant:     {n_sig} ({n_sig/n_genes*100:.0f}%)",
-        f"phi (NB size):   {phi:.2f}",
+        f"phi (NB size):   {_phi_label(phi)}",
         f"std(alpha_i):    {np.sqrt(var_alpha):.3f}",
         "",
         "Median decomposition (sig genes):",

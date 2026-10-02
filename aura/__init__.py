@@ -5,7 +5,7 @@ Detects genes whose expression in a focal cell type is structured by
 local neighborhood composition.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .model import run_model, run_model_sample, run_model_multisample
 from .io import load_adata, extract_focal, save_results, load_results

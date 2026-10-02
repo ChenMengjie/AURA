@@ -173,6 +173,13 @@ The beta matrix is decomposed by SVD to identify principal composition modes —
 | `alpha` | 0.05 | FDR threshold (Benjamini-Hochberg) |
 | `min_gene_mean` | 0.1 | Minimum gene mean for inclusion |
 | `seed` | 42 | Random seed for reproducibility |
+| `radius` | None | Physical neighborhood radius (coordinate units); overrides `k` |
+| `rings` | None | Increasing annulus radii, e.g. `[30, 100]`; adds per-ring p-values |
+| `min_neighbors` | 1 | Focal cells with fewer neighbors (radius/rings) are excluded |
+| `dispersion` | `'shared'` | `'shared'` NB dispersion, or `'gene'` (regularized mean trend) |
+| `center` | `'mean'` | Per-cell centering: `'mean'`, `'median'`, or `'trimmed'` |
+| `center_genes` | None | Reference genes (names or mask) used for per-cell centering |
+| `center_samples` | False | Multi-sample only: remove per-sample means (within-sample effects) |
 | `min_fold` | 2.0 | Fold-enrichment threshold for canonical markers |
 | `min_detection` | 0.05 | Detection rate threshold for canonical markers |
 
@@ -206,4 +213,4 @@ If you use AURA in your research, please cite:
 
 ## License
 
-MIT
+AURA is released under the MIT License (see `LICENSE`).

@@ -236,6 +236,8 @@ EXPECTED_RUN_KEYS = {
     'Q', 'pvalues', 'qvalues', 'significant', 'R2', 'R2_total', 'beta',
     'phi', 'residuals', 'P', 'P_tilde', 'K_comp',
     'total_var', 'baseline_var', 'excess_var', 'has_excess', 'sample_ids',
+    'R2_adj', 'R2_total_adj', 'R2_total_legacy', 'var_retained', 'R2_null',
+    'rank_P', 'block_pvalues', 'cell_mask', 'n_neighbors', 'neighborhood',
 }
 
 

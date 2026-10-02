@@ -132,8 +132,20 @@ def save_results(path, gene_names, result, type_names):
         "pvalue": result["pvalues"],
         "qvalue": result["qvalues"],
     })
-    for i, name in enumerate(type_names):
-        df[f"beta_{name}"] = result["beta"][:, i]
+    for key in ("R2_adj", "R2_total_adj", "R2_total_legacy", "var_retained"):
+        if result.get(key) is not None:
+            df[key] = result[key]
+    block_p = result.get("block_pvalues")
+    if block_p is not None:
+        for j in range(block_p.shape[0]):
+            df[f"pvalue_ring{j}"] = block_p[j]
+
+    beta = result["beta"]
+    n_blocks = beta.shape[1] // len(type_names)
+    for j in range(n_blocks):
+        suffix = "" if n_blocks == 1 else f"_ring{j}"
+        for i, name in enumerate(type_names):
+            df[f"beta_{name}{suffix}"] = beta[:, j * len(type_names) + i]
 
     df = df.sort_values("pvalue")
     df.to_csv(path, index=False)

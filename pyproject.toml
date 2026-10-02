@@ -4,8 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aura"
-version = "0.1.0"
+version = "0.2.0"
 description = "AURA: composition-dependent context variance model for spatial transcriptomics"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "Mengjie Chen"}]
 requires-python = ">=3.9"
 dependencies = [
     "numpy>=1.22",
@@ -16,4 +19,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest"]
+dev = ["pytest", "statsmodels"]
+
+[project.urls]
+Homepage = "https://github.com/ChenMengjie/AURA"
+
+[tool.setuptools.packages.find]
+include = ["aura*"]

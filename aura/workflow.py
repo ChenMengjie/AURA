@@ -39,6 +39,12 @@ class AuraResult:
     excess_var: np.ndarray
     has_excess: np.ndarray
     sample_ids: np.ndarray = None  # populated for multi-sample runs only
+    R2_adj: np.ndarray = None
+    R2_total_adj: np.ndarray = None
+    R2_total_legacy: np.ndarray = None
+    var_retained: np.ndarray = None
+    block_pvalues: np.ndarray = None  # (n_rings, n_genes) for ring neighborhoods
+    neighborhood: dict = None
 
     # Convenience properties
     @property
@@ -70,6 +76,9 @@ class AuraResult:
             P=self.P, P_tilde=self.P_tilde,
             total_var=self.total_var, baseline_var=self.baseline_var,
             excess_var=self.excess_var, has_excess=self.has_excess,
+            R2_adj=self.R2_adj, R2_total_adj=self.R2_total_adj,
+            R2_total_legacy=self.R2_total_legacy,
+            var_retained=self.var_retained, block_pvalues=self.block_pvalues,
         )
 
     def save(self, path):
@@ -77,10 +86,47 @@ class AuraResult:
         save_results(path, self.gene_names, self.to_dict(), self.type_names)
 
 
+_RESULT_KEYS = [
+    "Q", "pvalues", "qvalues", "significant",
+    "R2", "R2_total", "beta", "phi", "residuals",
+    "P", "P_tilde", "total_var", "baseline_var",
+    "excess_var", "has_excess", "sample_ids",
+    "R2_adj", "R2_total_adj", "R2_total_legacy", "var_retained",
+    "block_pvalues", "neighborhood",
+]
+
+
+def _build_result(result, focal, tissue):
+    """Wrap a run_model dict, dropping focal cells the model excluded."""
+    cell_mask = result.get("cell_mask")
+    if cell_mask is not None and not np.all(cell_mask):
+        focal = FocalData(counts=focal.counts[cell_mask],
+                          focal_xy=focal.focal_xy[cell_mask],
+                          gene_names=focal.gene_names)
+    return AuraResult(
+        focal_data=focal,
+        tissue_data=tissue,
+        type_names=tissue.type_names,
+        **{key: result.get(key) for key in _RESULT_KEYS},
+    )
+
+
+def _resolve_center_genes(model_kwargs, focal):
+    """Allow center_genes to be given as gene names (after gene filtering)."""
+    cg = model_kwargs.get("center_genes")
+    if cg is not None and len(cg) and isinstance(next(iter(cg)), str):
+        names = set(cg)
+        mask = np.array([g in names for g in focal.gene_names])
+        log.info("Centering on %d of %d reference genes present in panel",
+                 mask.sum(), len(names))
+        model_kwargs = dict(model_kwargs, center_genes=mask)
+    return model_kwargs
+
+
 def run_aura(tissue, focal_label, label_column="cell_type_nebula",
-             k=15, n_perm=1000, alpha=0.05,
+             k=30, n_perm=5000, alpha=0.05,
              min_gene_mean=0.1, max_cells=None, seed=42,
-             out_path=None):
+             out_path=None, **model_kwargs):
     """Run AURA on a single focal type from loaded tissue data.
 
     Args:
@@ -94,6 +140,8 @@ def run_aura(tissue, focal_label, label_column="cell_type_nebula",
         max_cells: subsample focal cells if exceeding this
         seed: random seed
         out_path: optional path to save results CSV
+        **model_kwargs: passed to `run_model` (radius, rings, min_neighbors,
+            dispersion, center, center_genes)
 
     Returns:
         AuraResult
@@ -104,6 +152,7 @@ def run_aura(tissue, focal_label, label_column="cell_type_nebula",
     focal = extract_focal(tissue, focal_label, label_column=label_column,
                           min_gene_mean=min_gene_mean, max_cells=max_cells,
                           seed=seed)
+    model_kwargs = _resolve_center_genes(model_kwargs, focal)
 
     result = run_model(
         counts=focal.counts,
@@ -111,20 +160,10 @@ def run_aura(tissue, focal_label, label_column="cell_type_nebula",
         all_xy=tissue.all_xy,
         all_types=tissue.all_types,
         k=k, n_perm=n_perm, alpha=alpha, seed=seed,
+        **model_kwargs,
     )
 
-    aura_result = AuraResult(
-        focal_data=focal,
-        tissue_data=tissue,
-        type_names=tissue.type_names,
-        **{key: result[key] for key in [
-            "Q", "pvalues", "qvalues", "significant",
-            "R2", "R2_total", "beta", "phi", "residuals",
-            "P", "P_tilde", "total_var", "baseline_var",
-            "excess_var", "has_excess",
-        ]},
-        sample_ids=result.get("sample_ids"),
-    )
+    aura_result = _build_result(result, focal, tissue)
 
     if out_path:
         aura_result.save(out_path)
@@ -134,10 +173,10 @@ def run_aura(tissue, focal_label, label_column="cell_type_nebula",
 
 def run_aura_multisample(tissue, focal_label, sample_column,
                          label_column="cell_type_nebula",
-                         k=15, n_perm=1000, alpha=0.05,
+                         k=30, n_perm=5000, alpha=0.05,
                          min_gene_mean=0.1, max_cells=None, seed=42,
                          null_counts=None, out_path=None,
-                         dispersion_mode='pooled'):
+                         dispersion_mode='pooled', **model_kwargs):
     """Run AURA with within-core kNN and within-sample permutation.
 
     For multi-sample spatial data (TMA, multi-section). Each cell's composition
@@ -156,6 +195,10 @@ def run_aura_multisample(tissue, focal_label, sample_column,
         seed: random seed
         null_counts: optional (n_ctrl, n_genes) control counts for null params
         out_path: optional path to save results CSV
+        dispersion_mode: see `run_model_multisample`
+        **model_kwargs: passed to `run_model_multisample` (dispersion,
+            radius, rings, min_neighbors, center, center_genes,
+            center_samples)
 
     Returns:
         AuraResult
@@ -166,6 +209,7 @@ def run_aura_multisample(tissue, focal_label, sample_column,
     focal = extract_focal(tissue, focal_label, label_column=label_column,
                           min_gene_mean=min_gene_mean, max_cells=max_cells,
                           seed=seed)
+    model_kwargs = _resolve_center_genes(model_kwargs, focal)
 
     # Build sample ID arrays
     adata = tissue.adata
@@ -203,20 +247,10 @@ def run_aura_multisample(tissue, focal_label, sample_column,
         k=k, n_perm=n_perm, alpha=alpha, seed=seed,
         null_counts=null_counts,
         dispersion_mode=dispersion_mode,
+        **model_kwargs,
     )
 
-    aura_result = AuraResult(
-        focal_data=focal,
-        tissue_data=tissue,
-        type_names=tissue.type_names,
-        **{key: result[key] for key in [
-            "Q", "pvalues", "qvalues", "significant",
-            "R2", "R2_total", "beta", "phi", "residuals",
-            "P", "P_tilde", "total_var", "baseline_var",
-            "excess_var", "has_excess",
-        ]},
-        sample_ids=result.get("sample_ids"),
-    )
+    aura_result = _build_result(result, focal, tissue)
 
     if out_path:
         aura_result.save(out_path)
