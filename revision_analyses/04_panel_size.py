@@ -52,7 +52,8 @@ def run_fit(tissue, fd, center, canonical, lin, n_perm, seed):
         kw["center_genes"] = ref
     res = fit(tissue, fd, n_perm, seed=seed, **kw)
     df = result_table(res, fd["genes"], tissue.type_names)
-    return spillover_flags(df, canonical, lin, tissue.type_names)
+    return spillover_flags(df, canonical, lin, tissue.type_names,
+                           P_sd=res["P"].std(axis=0))
 
 
 def compare(full, sub):

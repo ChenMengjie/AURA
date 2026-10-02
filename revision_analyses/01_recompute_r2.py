@@ -65,7 +65,8 @@ def main():
                 res = fit(tissue, fd, args.n_perm, seed=args.seed)
                 df = result_table(res, fd["genes"], tissue.type_names)
                 df = spillover_flags(df, canonical, focal_lineage(tissue, fd),
-                                     tissue.type_names)
+                                     tissue.type_names,
+                                     P_sd=res["P"].std(axis=0))
                 df.to_csv(path, index=False)
             df = pd.read_csv(path)
 
@@ -80,6 +81,8 @@ def main():
                        n_genes=len(df), n_sig=len(sig),
                        published_sig=PUBLISHED.get((ds, focal)),
                        n_spillover=int(sig.spillover_suspect.sum()),
+                       n_spillover_raw_driver=int(sig.spillover_suspect_raw.sum()),
+                       n_driver_changed=int((sig.driver_axis != sig.driver_axis_raw).sum()),
                        median_R2_total=sig.R2_total.median(),
                        median_R2_total_adj=sig.R2_total_adj.median(),
                        median_R2_total_legacy=sig.R2_total_legacy.median(),

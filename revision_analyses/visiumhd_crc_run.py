@@ -21,7 +21,7 @@ import aura
 from aura.io import TissueData
 from aura.model import run_model
 from common import result_table, spillover_flags, write_meta, done, log
-from visiumhd_crc_config import FOCAL, MAX_CELLS
+from visiumhd_crc_config import FOCAL, MAX_CELLS, FAMILY
 
 
 def main(h5ad, out, quick=False):
@@ -36,6 +36,12 @@ def main(h5ad, out, quick=False):
     import scanpy as sc
     import scipy.sparse as sp
     adata = sc.read_h5ad(h5ad)
+    # fold rare lineages (< 0.5% of cells) into 'Unassigned'
+    frac = adata.obs["lineage"].value_counts(normalize=True)
+    rare = list(frac.index[frac < 0.005])
+    log.info("folding rare lineages into Unassigned: %s", rare)
+    adata.obs["lineage"] = adata.obs["lineage"].astype(str).replace(
+        {r: "Unassigned" for r in rare})
     names = sorted(adata.obs["lineage"].unique())
     types = np.array([names.index(t) for t in adata.obs["lineage"]])
     tissue = TissueData(adata=adata,
@@ -45,6 +51,24 @@ def main(h5ad, out, quick=False):
     lab = adata.obs[adata.obs.lineage != "Unassigned"]
     canonical, _ = aura.learn_canonical(adata[lab.index], type_column="lineage",
                                         min_fold=2.0, min_detection=0.05)
+    # markers shared within a lineage family (tumor vs normal epithelium,
+    # fibroblast vs smooth muscle) fail the 2-fold rule for either member;
+    # learn them at family level too and credit them to every member
+    fam = adata[lab.index].copy()
+    fam.obs["family"] = fam.obs["lineage"].map(FAMILY).fillna(fam.obs["lineage"])
+    fam_markers, _ = aura.learn_canonical(fam, type_column="family",
+                                          min_fold=2.0, min_detection=0.05)
+    own_canonical = {k: set(v) for k, v in canonical.items()}
+    for lin_, f_ in FAMILY.items():
+        if lin_ in canonical:
+            canonical[lin_] = set(canonical[lin_]) | set(fam_markers.get(f_, set()))
+    # per-lineage mean expression (library-size normalized) for the
+    # relative spillover rule
+    norm = adata[lab.index].copy()
+    sc.pp.normalize_total(norm, target_sum=1e3)
+    lineage_means = pd.DataFrame(
+        {l: np.asarray(norm[norm.obs.lineage == l].X.mean(axis=0)).ravel()
+         for l in names if l != "Unassigned"}, index=norm.var_names)
 
     rows = []
     for focal in FOCAL:
@@ -63,13 +87,24 @@ def main(h5ad, out, quick=False):
             res = run_model(counts, tissue.all_xy[idx], tissue.all_xy, types,
                             k=30, n_perm=n_perm, seed=42)
             df = result_table(res, genes, names)
-            spillover_flags(df, canonical, lin, names).to_csv(path, index=False)
+            nf = adata[adata.obs_names[idx]].copy()
+            sc.pp.normalize_total(nf, target_sum=1e3)
+            focal_means = pd.Series(np.asarray(nf.X.mean(axis=0)).ravel(),
+                                    index=nf.var_names)
+            spillover_flags(df, canonical, lin, names,
+                            P_sd=res["P"].std(axis=0),
+                            own_markers=own_canonical.get(lin, set()),
+                            lineage_means=lineage_means,
+                            focal_means=focal_means).to_csv(path, index=False)
         df = pd.read_csv(path)
         sig = df[df.significant]
         rows.append(dict(focal=focal, lineage=lin, n_cells=len(idx),
                          n_genes=len(df), n_sig=len(sig),
                          pct_sig=len(sig) / len(df),
                          n_spillover=int(sig.spillover_suspect.sum()),
+                         n_spillover_rel=int(sig.spillover_suspect_rel.sum()),
+                         n_clean_both=int((~sig.spillover_suspect & ~sig.spillover_suspect_rel).sum()),
+                         top_drivers=str(sig.driver_axis.value_counts().head(3).to_dict()),
                          median_R2_total=sig.R2_total.median(),
                          median_R2_total_legacy=sig.R2_total_legacy.median(),
                          top_genes=", ".join(sig.sort_values("R2_total",

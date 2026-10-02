@@ -268,18 +268,60 @@ def focal_lineage(tissue, fd):
     return tissue.type_names[np.bincount(types).argmax()]
 
 
-def spillover_flags(df, canonical, focal_lin, type_names):
-    """Add driver_axis / spillover_suspect columns (significant genes only)."""
+def spillover_flags(df, canonical, focal_lin, type_names, P_sd=None,
+                    own_markers=None, lineage_means=None, focal_means=None,
+                    rel_fold=2.0):
+    """Add driver and spillover columns (significant genes only).
+
+    driver_axis_raw / spillover_suspect_raw: driver = argmax |beta_k|
+        (the v0.1 rule used in the manuscript).
+    driver_axis / spillover_suspect: with `P_sd` (per-axis SD of the focal
+        cells' composition), driver = argmax beta_k * sd(P_k) over positive
+        contributions, i.e. the neighbor lineage whose observed range of
+        local fraction raises expression most. Raw |beta| favours rare axes,
+        whose fractions barely vary and whose coefficients are therefore
+        large and noisy, and can pick a negative coefficient on the dominant
+        lineage. Without `P_sd` both definitions coincide.
+    own_markers: genes exempt as the focal lineage's own markers (defaults
+        to canonical[focal_lin]).
+    spillover_suspect_rel (if lineage_means / focal_means are given): the
+        driver lineage expresses the gene >= rel_fold times more than the
+        focal cells themselves. Unlike the canonical-marker rule this also
+        catches genes shared by several neighbor lineages (e.g. VIM).
+    """
     bcols = [f"beta_{t}" for t in type_names]
-    own = canonical.get(focal_lin, set())
-    driver = np.array(type_names)[np.abs(df[bcols].values).argmax(axis=1)]
-    suspect = np.array([
-        sig and (g in canonical.get(d, set())) and (g not in own)
-        for g, d, sig in zip(df["gene"], driver, df["significant"])
-    ])
+    own = canonical.get(focal_lin, set()) if own_markers is None else own_markers
+    names = np.array(type_names)
+    B = np.abs(df[bcols].values)
+
+    def flag(driver):
+        return np.array([
+            bool(sig) and (g in canonical.get(d, set())) and (g not in own)
+            for g, d, sig in zip(df["gene"], driver, df["significant"])
+        ])
+
     df = df.copy()
-    df["driver_axis"] = driver
-    df["spillover_suspect"] = suspect
+    raw = names[B.argmax(axis=1)]
+    if P_sd is not None:
+        # spillover means a POSITIVE association with the source lineage;
+        # with compositions summing to one, the largest |beta| can be a
+        # negative coefficient on the dominant lineage instead
+        C = df[bcols].values * np.asarray(P_sd)[None, :]
+        pos = C.max(axis=1) > 0
+        std = np.where(pos, names[C.argmax(axis=1)], names[np.abs(C).argmax(axis=1)])
+    else:
+        std = raw
+    df["driver_axis_raw"], df["spillover_suspect_raw"] = raw, flag(raw)
+    df["driver_axis"], df["spillover_suspect"] = std, flag(std)
+    if lineage_means is not None and focal_means is not None:
+        lm = lineage_means.reindex(df["gene"])
+        drv = np.array([lm.at[g, d] if d in lm.columns else np.nan
+                        for g, d in zip(df["gene"], std)], dtype=float)
+        fm = focal_means.reindex(df["gene"]).values
+        df["driver_over_focal"] = drv / np.maximum(fm, 1e-6)
+        df["spillover_suspect_rel"] = df["significant"].values & \
+            (df["driver_over_focal"].values >= rel_fold) & \
+            ~df["gene"].isin(own).values
     return df
 
 

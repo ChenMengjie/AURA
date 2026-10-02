@@ -55,8 +55,9 @@ def main():
                         kw = {"center_genes": ref}
                     res = fit(tissue, fd, args.n_perm, seed=args.seed, **kw)
                     df = result_table(res, fd["genes"], tissue.type_names)
-                    spillover_flags(df, canonical, lin,
-                                    tissue.type_names).to_csv(path, index=False)
+                    spillover_flags(df, canonical, lin, tissue.type_names,
+                                    P_sd=res["P"].std(axis=0)
+                                    ).to_csv(path, index=False)
                 tabs[name] = pd.read_csv(path)
             ref = tabs["mean"]
             ref_sig = set(ref.gene[ref.significant])

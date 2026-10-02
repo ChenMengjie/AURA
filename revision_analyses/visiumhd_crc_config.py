@@ -33,3 +33,7 @@ LINEAGE_MAP = {
 # Focal populations (fine labels), chosen to parallel the Xenium analyses
 FOCAL = ['Macrophage', 'CAF', 'Endothelial', 'Plasma', 'Goblet', 'Tumor III']
 MAX_CELLS = {'Tumor III': 20000}
+
+# Lineage families for shared markers (used only by the spillover filter)
+FAMILY = {'Tumor': 'Epithelial_family', 'Epithelial': 'Epithelial_family',
+          'Fibroblast': 'Mesenchymal_family', 'SMC_Peri': 'Mesenchymal_family'}
