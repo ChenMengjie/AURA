@@ -123,7 +123,8 @@ def test_rings_blocks_and_pvalues():
     assert r['block_pvalues'].shape == (2, 25)
     blocks = r['P'].reshape(n_kept, 2, 4).sum(axis=2)
     assert np.allclose(blocks, 1.0)
-    assert r['neighborhood'] == {'type': 'rings', 'rings': [20, 60]}
+    assert r['neighborhood'] == {'type': 'rings', 'rings': [20, 60],
+                                 'spatial_trend': None}
 
 
 def test_isolated_cells_are_excluded():
@@ -240,3 +241,50 @@ def test_save_results_ring_columns(tmp_path):
     for col in ('R2_total_adj', 'R2_total_legacy', 'pvalue_ring0',
                 'pvalue_ring1', 'beta_A_ring0', 'beta_D_ring1'):
         assert col in df.columns
+
+
+# ─────────────────────────────────────────────────────────────────────
+# spatial trend adjustment
+# ─────────────────────────────────────────────────────────────────────
+
+def test_spatial_trend_basis_partition_of_unity():
+    from aura.model import spatial_trend_basis
+    rng = np.random.default_rng(14)
+    xy = rng.uniform(0, 1000, size=(500, 2))
+    W = spatial_trend_basis(xy, 250)
+    assert np.allclose(W.sum(axis=1), 1.0)
+    assert W.shape[1] <= 7 * 7
+
+
+def test_spatial_trend_removes_large_gradient():
+    """A gene with a tissue-scale gradient aligned with a composition
+    gradient is significant without adjustment and not with it."""
+    rng = np.random.default_rng(15)
+    n_focal, n_other, size = 1500, 6000, 2000.0
+    focal_xy = rng.uniform(0, size, (n_focal, 2))
+    other_xy = rng.uniform(0, size, (n_other, 2))
+    # composition gradient: type 1 more common on the right
+    p1 = other_xy[:, 0] / size
+    other_t = np.where(rng.random(n_other) < p1, 1, 2)
+    all_xy = np.vstack([focal_xy, other_xy])
+    all_types = np.concatenate([np.zeros(n_focal, int), other_t])
+    mu = np.full(20, 5.0)
+    lam = mu[None, :] * np.exp(np.outer(focal_xy[:, 0] / size - 0.5, np.r_[1.0, np.zeros(19)]))
+    counts = rng.poisson(lam).astype(float)
+    r0 = run_model(counts, focal_xy, all_xy, all_types, k=20, n_perm=300)
+    r1 = run_model(counts, focal_xy, all_xy, all_types, k=20, n_perm=300,
+                   spatial_trend=500)
+    assert r0['pvalues'][0] < 0.01
+    assert r1['pvalues'][0] > 0.05
+    assert r1['neighborhood']['spatial_trend'] == 500
+
+
+def test_spatial_trend_multisample_runs():
+    rng = np.random.default_rng(16)
+    focal_xy, all_xy, all_types = _tissue(rng, n_focal=300, n_other=900)
+    fs = rng.integers(0, 3, 300)
+    alls = np.concatenate([fs, rng.integers(0, 3, 900)])
+    counts = rng.poisson(5, size=(300, 15)).astype(float)
+    r = run_model_multisample(counts, focal_xy, all_xy, all_types, fs, alls,
+                              k=10, n_perm=50, spatial_trend=150)
+    assert np.isfinite(r['pvalues']).all()

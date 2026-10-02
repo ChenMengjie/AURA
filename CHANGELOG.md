@@ -32,6 +32,12 @@
 - `center=` ('mean', 'median', 'trimmed') and `center_genes=` for per-cell
   centering on a reference gene set.
 - `center_samples=` in `run_model_multisample`.
+- `spatial_trend=` (length scale): residualize residuals and composition on
+  a tensor-product cubic B-spline basis (`spatial_trend_basis`) before
+  testing, within each sample in multi-sample mode, so tissue-scale
+  gradients unrelated to local composition are not called. Effective only
+  for gradients well above the knot spacing; warns when the basis is large
+  relative to the number of focal cells.
 - `LICENSE` file (MIT).
 
 ### Unchanged

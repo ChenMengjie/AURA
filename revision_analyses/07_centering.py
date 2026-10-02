@@ -1,5 +1,6 @@
 """
-07 — Per-cell centering choices on the real targeted panels (S8, S9).
+07 — Per-cell centering and spatial-trend choices on the real targeted
+panels (S8, S9, S11).
 
 For every published IPF and NSCLC focal type (multi-sample mode), refit with
     mean              v0.1 default
@@ -9,6 +10,9 @@ For every published IPF and NSCLC focal type (multi-sample mode), refit with
                       enters)
     mean+samples      mean, plus within-sample removal of gene and
                       composition means (`center_samples=True`)
+    trend500          residuals and composition residualized on a smooth
+                      spatial basis (500 µm knots) within each core (S11)
+    nonmarker+trend500  both
 
 and report significant counts, overlap with the default, spillover-suspect
 rates, and, for genes that lose significance under nonmarker centering,
@@ -27,7 +31,9 @@ from common import (FOCAL, parse_args, outdir, write_meta, done, load_dataset,
                     log)
 
 VARIANTS = {"mean": {}, "median": {"center": "median"},
-            "nonmarker": None, "mean+samples": {"center_samples": True}}
+            "nonmarker": None, "mean+samples": {"center_samples": True},
+            "trend500": {"spatial_trend": 500},
+            "nonmarker+trend500": "nonmarker+trend"}
 
 
 def main():
@@ -48,11 +54,12 @@ def main():
             for name, kw in VARIANTS.items():
                 path = d / "results" / f"{ds}__{focal.replace('/', '_')}__{name}.csv"
                 if not done(path):
-                    if kw is None:
+                    if kw is None or kw == "nonmarker+trend":
                         ref = non_marker_genes(fd["genes"], canonical, lin)
                         log.info("%s/%s: centering on %d non-marker genes of %d",
                                  ds, focal, ref.sum(), len(ref))
-                        kw = {"center_genes": ref}
+                        kw = {"center_genes": ref} if kw is None else \
+                            {"center_genes": ref, "spatial_trend": 500}
                     res = fit(tissue, fd, args.n_perm, seed=args.seed, **kw)
                     df = result_table(res, fd["genes"], tissue.type_names)
                     spillover_flags(df, canonical, lin, tissue.type_names,

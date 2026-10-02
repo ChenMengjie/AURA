@@ -9,6 +9,7 @@ import logging
 import numpy as np
 from scipy.spatial import cKDTree
 from scipy.optimize import minimize_scalar
+from scipy.interpolate import BSpline
 
 log = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ __all__ = [
     "bh_fdr",
     "effect_size",
     "variance_decomposition",
+    "spatial_trend_basis",
     "run_model",
     "run_model_sample",
     "run_model_multisample",
@@ -526,6 +528,70 @@ def variance_decomposition(counts, phi, residuals, R2, rank, mu_ref=None):
     )
 
 
+
+def spatial_trend_basis(xy, length_scale, degree=3):
+    """Smooth spatial basis for removing large-scale trends.
+
+    Tensor product of cubic B-splines in x and y with knots every
+    `length_scale` (coordinate units). The basis is a partition of unity, so
+    it contains the intercept. Columns with no cells in their support are
+    dropped.
+
+    Args:
+        xy: (n, 2) coordinates
+        length_scale: knot spacing; variation on scales well above it is
+            treated as trend, variation on scales well below it is kept
+        degree: spline degree
+
+    Returns:
+        W: (n, m) basis matrix
+    """
+    xy = np.asarray(xy, dtype=float)
+    mats = []
+    for d in range(2):
+        x = xy[:, d]
+        lo, hi = x.min(), x.max()
+        if hi - lo < 1e-9:
+            mats.append(np.ones((len(x), 1)))
+            continue
+        n_int = max(1, int(np.ceil((hi - lo) / length_scale)))
+        inner = np.linspace(lo, hi, n_int + 1)
+        t = np.r_[[lo] * degree, inner, [hi] * degree]
+        mats.append(BSpline.design_matrix(np.clip(x, lo, hi), t, degree).toarray())
+    W = (mats[0][:, :, None] * mats[1][:, None, :]).reshape(len(xy), -1)
+    return W[:, (W > 1e-12).sum(axis=0) > 0]
+
+
+def _residualize(M, W):
+    """M minus its least-squares projection on the columns of W."""
+    coef, _, _, _ = np.linalg.lstsq(W, M, rcond=None)
+    return M - W @ coef
+
+
+def _remove_trend(residuals, P_tilde, xy, length_scale, sample_ids=None):
+    """Residualize residuals and composition on a smooth spatial basis
+    (separately within each sample if `sample_ids` is given), so that the
+    test uses only composition variation on scales below `length_scale`."""
+    residuals = residuals.copy()
+    P_tilde = P_tilde.copy()
+    groups = [np.arange(len(xy))] if sample_ids is None else \
+        [np.where(sample_ids == s)[0] for s in np.unique(sample_ids)]
+    n_basis = 0
+    for idx in groups:
+        W = spatial_trend_basis(xy[idx], length_scale)
+        if W.shape[1] >= len(idx):
+            W = np.ones((len(idx), 1))
+        residuals[idx] = _residualize(residuals[idx], W)
+        P_tilde[idx] = _residualize(P_tilde[idx], W)
+        n_basis += W.shape[1]
+    log.info("Removed spatial trend (length scale %.0f): %d basis columns",
+             length_scale, n_basis)
+    if n_basis > 0.1 * len(xy):
+        log.warning("spatial trend basis has %d columns for %d cells; the "
+                    "adjustment absorbs many degrees of freedom and reduces "
+                    "power. Consider a larger length scale.", n_basis, len(xy))
+    return residuals, P_tilde, n_basis
+
 def _finalize(counts, phi, residuals, P, P_tilde, K_comp, Q, pvalues,
               block_pvalues, alpha, mu_ref=None, sample_ids=None,
               cell_mask=None, n_neighbors=None, neighborhood=None):
@@ -579,7 +645,8 @@ def _drop_sparse_cells(n_nbrs, min_neighbors):
 def run_model(counts, focal_xy, all_xy, all_types, k=30, n_perm=5000,
               alpha=0.05, min_mean=0.5, seed=42,
               radius=None, rings=None, min_neighbors=1,
-              dispersion="shared", center="mean", center_genes=None):
+              dispersion="shared", center="mean", center_genes=None,
+              spatial_trend=None):
     """Run the full composition-dependent context variance model.
 
     Args:
@@ -600,6 +667,10 @@ def run_model(counts, focal_xy, all_xy, all_types, k=30, n_perm=5000,
         dispersion: 'shared' (one phi) or 'gene' (regularized trend)
         center: per-cell centering estimator ('mean', 'median', 'trimmed')
         center_genes: optional genes used to compute the per-cell center
+        spatial_trend: optional length scale (coordinate units). Residuals
+            and composition are residualized on a smooth spatial basis
+            (`spatial_trend_basis`) before testing, so that tissue-scale
+            gradients unrelated to local composition are not called.
 
     Returns:
         dict with keys: Q, pvalues, qvalues, significant, R2, R2_adj,
@@ -621,6 +692,9 @@ def run_model(counts, focal_xy, all_xy, all_types, k=30, n_perm=5000,
     residuals = compute_pearson_residuals(counts, phi, center=center,
                                           center_genes=center_genes)
     K_comp, P_tilde = composition_kernel(P)
+    if spatial_trend is not None:
+        residuals, P_tilde, _ = _remove_trend(
+            residuals, P_tilde, focal_xy[cell_mask], spatial_trend)
 
     out = permutation_test(residuals, P_tilde, n_perm=n_perm, seed=seed,
                            blocks=_blocks(P.shape[1], n_types))
@@ -630,7 +704,8 @@ def run_model(counts, focal_xy, all_xy, all_types, k=30, n_perm=5000,
     return _finalize(counts, phi, residuals, P, P_tilde, K_comp, Q, pvalues,
                      block_pvalues, alpha, cell_mask=cell_mask,
                      n_neighbors=n_nbrs,
-                     neighborhood=_neighborhood_spec(k, radius, rings))
+                     neighborhood=dict(_neighborhood_spec(k, radius, rings),
+                                       spatial_trend=spatial_trend))
 
 
 # ============================================================
@@ -739,7 +814,7 @@ def run_model_multisample(counts, focal_xy, all_xy, all_types,
                           dispersion='shared',
                           radius=None, rings=None, min_neighbors=1,
                           center='mean', center_genes=None,
-                          center_samples=False):
+                          center_samples=False, spatial_trend=None):
     """Run AURA with within-core composition and within-sample permutation.
 
     For multi-sample spatial data (TMA, multi-section). Each cell's composition
@@ -777,6 +852,9 @@ def run_model_multisample(counts, focal_xy, all_xy, all_types,
             test statistic and β use only within-sample variation (the
             between-sample component is constant under within-sample
             permutation). Off by default to reproduce v0.1 results.
+        spatial_trend: optional length scale; residuals and composition are
+            residualized on a smooth spatial basis within each sample
+            (see `run_model`)
 
     Returns:
         dict with the same keys as `run_model`
@@ -842,6 +920,10 @@ def run_model_multisample(counts, focal_xy, all_xy, all_types,
             residuals[s_mask] -= residuals[s_mask].mean(axis=0, keepdims=True)
             P[s_mask] -= P[s_mask].mean(axis=0, keepdims=True)
     K_comp, P_tilde = composition_kernel(P)
+    if spatial_trend is not None:
+        residuals, P_tilde, _ = _remove_trend(
+            residuals, P_tilde, focal_xy[cell_mask], spatial_trend,
+            sample_ids=focal_sample_ids)
 
     # Stage 3: within-sample permutation test
     out = permutation_test_within_sample(
@@ -861,7 +943,8 @@ def run_model_multisample(counts, focal_xy, all_xy, all_types,
                      block_pvalues, alpha, mu_ref=mu_ref,
                      sample_ids=focal_sample_ids, cell_mask=cell_mask,
                      n_neighbors=n_nbrs,
-                     neighborhood=_neighborhood_spec(k, radius, rings))
+                     neighborhood=dict(_neighborhood_spec(k, radius, rings),
+                                       spatial_trend=spatial_trend))
 
 
 def run_model_sample(counts, sample_ids, sample_composition, n_perm=5000,
