@@ -8,7 +8,6 @@ local neighborhood composition.
 __version__ = "0.2.0"
 
 from .model import run_model, run_model_sample, run_model_multisample
-from .spot import run_model_spot, neighbor_composition
 from .io import load_adata, extract_focal, save_results, load_results
 from .workflow import run_aura, run_aura_multisample, AuraResult
 from .spillover import (spillover_filter, spillover_filter_multi,

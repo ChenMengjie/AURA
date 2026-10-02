@@ -1,36 +1,27 @@
 """
-AURA spot mode: composition dependence for multi-cell spots (e.g. 10x Visium).
+Supplementary simulation: why AURA is not applied to standard (55 µm) Visium.
 
-At spot resolution a spot's own cell mixture determines most of its
-expression, so the cell-level question "does this cell's expression depend
-on its neighbors?" becomes "does a spot's expression depend on the
-composition of the *surrounding* spots, beyond its own composition?".
+A spot-level analogue of AURA tests whether a spot's expression depends on the
+composition of surrounding spots after adjusting for its own composition
+(Frisch–Waugh–Lovell residualization of residuals and neighbor composition on
+own composition, then the omnibus permutation test). On a simulated Visium
+grid with mixture expression, the test is calibrated only when own
+composition is known exactly; realistic deconvolution error leaves own-mixture
+signal in the residuals, which spatially smooth neighbor composition proxies
+for, and the false-positive rate approaches 1. Adding own-expression PCs does
+not repair it.
 
-Model, per gene g over spots s:
-
-    r_sg   Pearson residual under the NB null (spot-centered, as in run_model)
-    W      [1, own composition pi_s]                 (adjustment covariates)
-    N      composition of neighboring spots (rings), excluding spot s
-
-Both r and N are residualized on W (Frisch–Waugh–Lovell), and the omnibus
-statistic Q_g = ||N~^T r~_g||² is tested by permuting rows of N~, as in the
-single-cell model. β_g are the partial effects of neighbor composition given
-own composition.
+Run: python spot_simulation.py  (prints the calibration table)
 """
-
 import logging
 
 import numpy as np
 from scipy.spatial import cKDTree
 
-from .model import (_estimate_phi, compute_pearson_residuals, permutation_test,
-                    _finalize)
+from aura.model import (_estimate_phi, compute_pearson_residuals,
+                        permutation_test, _finalize)
 
 log = logging.getLogger(__name__)
-
-__all__ = ["spot_spacing", "neighbor_composition", "expression_pcs",
-           "run_model_spot"]
-
 
 def spot_spacing(xy):
     """Median center-to-center distance between nearest spots."""
@@ -181,3 +172,67 @@ def run_model_spot(counts, xy, comp, focal_mask=None, rings=(1.5,),
                                   "n_covariates": W.shape[1]})
     res["own_comp"] = own
     return res
+
+
+def main():
+    import logging
+    from scipy.stats import chi2
+    from aura.model import bh_fdr
+    logging.getLogger('aura').setLevel(logging.WARNING)
+    rng = np.random.default_rng(0)
+    rows, cols = 60, 70
+    xy = np.array([(c*100 + (r % 2)*50, r*86.6) for r in range(rows) for c in range(cols)], float)
+    S, K, G = len(xy), 8, 300
+    cent = rng.uniform(0, xy.max(), (60, 2)); typ = rng.integers(0, K, 60)
+    w = np.exp(-((xy[:, None]-cent[None])**2).sum(-1)/(2*250**2))
+    logit = np.stack([np.log(w[:, typ == k].sum(1)+1e-3) for k in range(K)], 1)
+    comp = np.exp(1.5*logit); comp /= comp.sum(1, keepdims=True)
+    sig = np.exp(rng.normal(0, 1.5, (K, G)))
+    ncell = rng.poisson(8, S)+1
+    N, _ = neighbor_composition(xy, comp, rings=(1.5,)); Nc = N-N.mean(0)
+    lam_gc = lambda p: np.median(chi2.isf(np.clip(p, 1e-300, 1), 1))/chi2.ppf(.5, 1)
+
+    def sim(n_sig=0, scale=1.0, het=0.0, smooth=0.0):
+        mu = (comp*ncell[:, None])@sig*0.3
+        beta = np.zeros((G, K)); truth = np.zeros(G, bool)
+        if n_sig:
+            idx = rng.choice(G, n_sig, replace=False); truth[idx] = True
+            beta[idx] = rng.normal(0, scale, (n_sig, K))
+            mu = mu*np.exp(Nc@beta.T)
+        if het:   # spot-level capture efficiency
+            mu = mu*rng.gamma(1/het, het, (S, 1))
+        if smooth:  # unmodeled smooth spatial field per gene (not composition)
+            f = np.sin(xy[:, :1]/700*rng.uniform(.5, 2, G) + rng.uniform(0, 6, G))
+            mu = mu*np.exp(smooth*f)
+        return rng.negative_binomial(5, 5/(5+mu)).astype(float), truth
+
+    def noisy(c, conc):
+        return np.vstack([rng.dirichlet(conc*ci+1e-3) for ci in c])
+
+    def report(name, X, truth, own=comp, **kw):
+        r = run_model_spot(X, xy, own, n_perm=1000, seed=1, **kw)
+        p = r['pvalues']; q, _ = bh_fdr(p); null = ~truth
+        tpr = f"{(q[truth] <= .05).mean():.2f}" if truth.any() else "  - "
+        print(f"{name:44s} {np.mean(p[null] < .05):6.3f} {lam_gc(p[null]):6.2f} {int((q[null] <= .05).sum()):5d} {tpr}")
+
+    print(f"{'scenario':44s} {'FPR':>6s} {'lamGC':>6s} {'nFDR0':>5s} TPR")
+    X, t = sim(); report('null', X, t)
+    report('null, no own-composition adjustment', X, t, adjust_own=False)
+    X, t = sim(het=0.3); report('null + spot capture variation', X, t)
+    for conc in (200, 50, 20):
+        X, t = sim(); report(f'null, noisy deconvolution (conc={conc})', X, t, own=noisy(comp, conc))
+    X, t = sim(smooth=0.3); report('null + smooth non-composition field', X, t)
+    X, t = sim(n_sig=30, scale=0.5); report('30 genes with neighbor effects', X, t)
+    X, t = sim(n_sig=30, scale=0.5); report('  ... with noisy deconvolution (conc=50)', X, t, own=noisy(comp, 50))
+    print('--- with own-expression PCs as covariates')
+    for L in (10, 20, 40):
+        X, t = sim(); report(f'null, noisy deconv (conc=50), PCs={L}', X, t, own=noisy(comp, 50), n_pcs=L)
+    X, t = sim(); report('null, exact composition, PCs=20', X, t, n_pcs=20)
+    X, t = sim(het=0.3); report('null + capture variation, noisy, PCs=20', X, t, own=noisy(comp, 50), n_pcs=20)
+    X, t = sim(n_sig=30, scale=1.0); report('30 effect genes (scale 1), exact, PCs=0', X, t)
+    X, t = sim(n_sig=30, scale=1.0); report('30 effect genes (scale 1), noisy, PCs=20', X, t, own=noisy(comp, 50), n_pcs=20)
+    X, t = sim(smooth=0.3); report('null + smooth field, PCs=20', X, t, own=noisy(comp, 50), n_pcs=20)
+
+
+if __name__ == "__main__":
+    main()
