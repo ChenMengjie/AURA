@@ -1,5 +1,8 @@
 # AURA revision analyses (Genome Biology, 2026)
 
+Handoff notes, decisions and the list of remaining tasks are in
+`Ongoing/Spatial_variance_component/Revision/RESUME_HERE.md` on Google Drive.
+
 Scripts that produce the new analyses requested in review. Each script is
 resumable (finished outputs are skipped) and accepts `--quick` for a smoke
 test and `--n-perm N` to override permutations.
