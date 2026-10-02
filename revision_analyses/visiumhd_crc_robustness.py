@@ -110,6 +110,7 @@ def main(h5ad, out, quick=False):
                 row[f"clean_{vname}"] = bool(t.at[g, "significant"]
                                              and not t.at[g, "spillover_suspect"])
             row["driver_default"] = base.at[g, "driver_axis"]
+            row["driver_contribution"] = base.at[g, "driver_axis_contribution"]
             row["R2_total_default"] = base.at[g, "R2_total"]
             genes_rows.append(row)
         pd.DataFrame(runs).to_csv(out / "robustness_runs.csv", index=False)

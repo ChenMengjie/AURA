@@ -370,8 +370,8 @@ def test_driver_axes_ignores_rare_axis():
     from aura.spillover import driver_axes
     beta = np.array([[0.8, 0.0, 40.0]])      # axis 2: rare type
     sd = np.array([0.20, 0.10, 0.001])
-    assert driver_axes(beta, method="abs_beta")[0][0] == 2
-    idx, contrib = driver_axes(beta, sd)
+    assert driver_axes(beta)[0][0] == 2                 # default: abs_beta
+    idx, contrib = driver_axes(beta, sd, "contribution")
     assert idx[0] == 0
     assert contrib[0] == pytest.approx(0.16)
 
@@ -384,7 +384,7 @@ def test_driver_axes_prefers_positive_contribution():
     beta = np.array([[-3.0, 1.5, 0.2],       # 'tumor' negative, 'fibro' positive
                      [-1.0, -2.0, -0.5]])    # no positive contribution
     sd = np.array([0.3, 0.2, 0.2])
-    idx, contrib = driver_axes(beta, sd)
+    idx, contrib = driver_axes(beta, sd, "contribution")
     assert idx[0] == 1
     assert idx[1] == 1                       # no positive: largest |contribution| (-0.4)
     assert contrib[1] < 0
@@ -393,7 +393,7 @@ def test_driver_axes_prefers_positive_contribution():
 def test_driver_axes_requires_sd():
     from aura.spillover import driver_axes
     with pytest.raises(ValueError):
-        driver_axes(np.ones((2, 3)))
+        driver_axes(np.ones((2, 3)), method="contribution")
 
 
 def test_spillover_filter_uses_composition_sd(tmp_path):
@@ -421,12 +421,14 @@ def test_spillover_filter_uses_composition_sd(tmp_path):
     save_results(path, np.array(['GENE1', 'GENE2']), res, ['A', 'B', 'C'])
 
     out = spillover_filter(csv_path=path, canonical=canonical,
-                           focal_lineage='B').set_index('gene')
+                           focal_lineage='B',
+                           driver='contribution').set_index('gene')
     assert out.loc['GENE1', 'driver_axis'] == 'A'
     assert out.loc['GENE1', 'driver_axis_abs_beta'] == 'C'
     assert bool(out.loc['GENE1', 'spillover_suspect'])
 
-    legacy = spillover_filter(csv_path=path, canonical=canonical,
-                              focal_lineage='B', driver='abs_beta').set_index('gene')
-    assert legacy.loc['GENE1', 'driver_axis'] == 'C'
-    assert not bool(legacy.loc['GENE1', 'spillover_suspect'])
+    # default = manuscript rule (argmax |beta|)
+    default = spillover_filter(csv_path=path, canonical=canonical,
+                               focal_lineage='B').set_index('gene')
+    assert default.loc['GENE1', 'driver_axis'] == 'C'
+    assert not bool(default.loc['GENE1', 'spillover_suspect'])

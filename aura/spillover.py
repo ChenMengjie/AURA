@@ -96,7 +96,7 @@ CANONICAL_LYMPHNODE = {
 
 
 
-def driver_axes(beta, axis_sd=None, method="contribution"):
+def driver_axes(beta, axis_sd=None, method="abs_beta"):
     """Dominant neighbor axis for each gene.
 
     Args:
@@ -104,15 +104,18 @@ def driver_axes(beta, axis_sd=None, method="contribution"):
         axis_sd: (K,) standard deviation of each composition axis across the
             focal cells; required for method='contribution'
         method:
-            'contribution' (default): the axis with the largest positive
+            'abs_beta' (default): argmax |beta_k|, the rule used in the
+                AURA manuscript.
+            'contribution': the axis with the largest positive
                 contribution beta_k * sd(P_k), i.e. the neighbor type whose
                 observed range of local fraction raises expression most;
                 genes with no positive contribution take the largest
                 |beta_k * sd(P_k)|.
-            'abs_beta': argmax |beta_k| (v0.1 rule). Biased toward rare
-                neighbor types, whose fractions barely vary and whose
-                coefficients are large and noisy, and can select a negative
-                coefficient on the dominant type (compositions sum to one).
+                Recommended when some neighbor types are rare (their
+                fractions barely vary, so their coefficients are large and
+                noisy and dominate |beta|) or when one type dominates the
+                tissue (with compositions summing to one, |beta| can pick a
+                negative coefficient on that type).
 
     Returns:
         idx: (n_genes,) driver axis index
@@ -288,7 +291,7 @@ def query_gene(gene_name, canonical=None, adata=None, type_column=None):
 
 def spillover_filter(result=None, csv_path=None, gene_names=None,
                      focal_lineage=None, canonical=None,
-                     type_names=None, driver="contribution", axis_sd=None):
+                     type_names=None, driver="abs_beta", axis_sd=None):
     """Flag significant genes as spillover-suspect or clean.
 
     A gene is spillover-suspect if:
@@ -308,12 +311,12 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
         canonical: dict mapping composition group names to sets of canonical
                    marker gene names. Defaults to DEFAULT_CANONICAL.
         type_names: list of composition axis names. Required if csv_path is used.
-        driver: 'contribution' (default) or 'abs_beta' (v0.1); see
-                `driver_axes`.
-        axis_sd: (K,) SD of each composition axis over the focal cells.
-                 Taken from result.P or from the CSV's sdP_* columns when
-                 not given; if unavailable, falls back to 'abs_beta' with a
-                 warning.
+        driver: 'abs_beta' (default; manuscript rule) or 'contribution';
+                see `driver_axes`.
+        axis_sd: (K,) SD of each composition axis over the focal cells,
+                 needed for driver='contribution'. Taken from result.P or
+                 from the CSV's sdP_* columns when not given; if unavailable,
+                 falls back to 'abs_beta' with a warning.
 
     Returns:
         DataFrame with columns:
@@ -410,7 +413,7 @@ def spillover_filter(result=None, csv_path=None, gene_names=None,
 
 
 def spillover_filter_multi(focals, canonical=None, type_names=None,
-                           driver="contribution"):
+                           driver="abs_beta"):
     """Run `spillover_filter` across multiple focal types and concatenate.
 
     Convenience wrapper for the common pattern in disease/multi-tissue

@@ -201,7 +201,8 @@ def result_panel(result=None, csv_path=None, title="AURA Results",
 
 def gene_zoom_panel(gene_name, result, all_xy=None, bg_masks=None,
                     n_drivers=3, n_bins=10,
-                    dot_size=12, title=None, out_path=None):
+                    dot_size=12, title=None, out_path=None,
+                    driver="abs_beta"):
     """Single-gene deep dive: spatial expression, beta profile, per-driver scatters.
 
     Layout:
@@ -218,6 +219,8 @@ def gene_zoom_panel(gene_name, result, all_xy=None, bg_masks=None,
         dot_size: size of focal cells in spatial maps (uniform across all rows)
         title: figure title override
         out_path: save path
+        driver: driver-axis ranking, 'abs_beta' (default) or 'contribution'
+            (see `aura.spillover.driver_axes`)
 
     Returns:
         matplotlib Figure
@@ -242,10 +245,11 @@ def gene_zoom_panel(gene_name, result, all_xy=None, bg_masks=None,
     beta_names = axis_names
     r2_total = result.R2_total[gene_row_idx]
 
-    # Top driver axes by contribution |beta_k| * sd(P_k): the expression
-    # change across the observed range of each axis (raw |beta| favours
-    # rare neighbor types)
-    if getattr(result, 'P', None) is not None and len(betas) == result.P.shape[1]:
+    # Top driver axes by |beta| (default) or, with driver='contribution', by
+    # |beta_k| * sd(P_k): the expression change across the observed range of
+    # each axis (raw |beta| favours rare neighbor types)
+    if (driver == "contribution" and getattr(result, 'P', None) is not None
+            and len(betas) == result.P.shape[1]):
         driver_order = np.argsort(np.abs(betas) * result.P.std(axis=0))[::-1][:n_drivers]
     else:
         driver_order = np.argsort(np.abs(betas))[::-1][:n_drivers]

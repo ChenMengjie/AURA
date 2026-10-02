@@ -439,13 +439,16 @@ def variance_panel(result, title="AURA Variance Decomposition", out_path=None):
     return fig
 
 
-def variance_summary(result=None, csv_path=None, focal_name=""):
+def variance_summary(result=None, csv_path=None, focal_name="",
+                     driver="abs_beta"):
     """Print text-based variance decomposition summary.
 
     Args:
         result: AuraResult (preferred)
         csv_path: alternative — path to results CSV
         focal_name: label for the focal type
+        driver: driver-axis rule, 'abs_beta' (default) or 'contribution'
+            (see `aura.spillover.driver_axes`)
 
     Returns:
         summary string
@@ -532,7 +535,7 @@ def variance_summary(result=None, csv_path=None, focal_name=""):
     sig_idx = np.where(sig)[0]
     from ..spillover import driver_axes
     sd_cols = [f"sdP_{a}" for a in axis_names]
-    if all(c in df.columns for c in sd_cols):
+    if driver == "contribution" and all(c in df.columns for c in sd_cols):
         drivers, _ = driver_axes(df[beta_cols].values,
                                  df[sd_cols].iloc[0].values, "contribution")
     else:

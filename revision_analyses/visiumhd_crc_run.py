@@ -102,6 +102,7 @@ def main(h5ad, out, quick=False):
                          n_genes=len(df), n_sig=len(sig),
                          pct_sig=len(sig) / len(df),
                          n_spillover=int(sig.spillover_suspect.sum()),
+                         n_spillover_contribution=int(sig.spillover_suspect_contribution.sum()),
                          n_spillover_rel=int(sig.spillover_suspect_rel.sum()),
                          n_clean_both=int((~sig.spillover_suspect & ~sig.spillover_suspect_rel).sum()),
                          top_drivers=str(sig.driver_axis.value_counts().head(3).to_dict()),
