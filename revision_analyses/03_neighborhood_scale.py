@@ -35,9 +35,23 @@ RINGS_S = [3, 8, 20]
 
 
 def spacing(tissue, fd):
-    """Median nearest-neighbor distance and distance to the k-th neighbor."""
-    tree = cKDTree(tissue.all_xy)
-    d, _ = tree.query(fd["xy"], k=max(KS) + 1)
+    """Median nearest-neighbor distance and distance to the k-th neighbor.
+
+    Multi-sample data are measured within each sample: the model builds
+    neighborhoods within samples, and raw per-slide coordinates of different
+    TMA cores can overlap, which would make cells from different cores look
+    like neighbors (IPF: 2.9 vs 9.8 units with/without this split).
+    """
+    if "sample_ids" in fd:
+        parts = []
+        for s_id in np.unique(fd["sample_ids"]):
+            tree = cKDTree(tissue.all_xy[fd["all_sample_ids"] == s_id])
+            d, _ = tree.query(fd["xy"][fd["sample_ids"] == s_id], k=max(KS) + 1)
+            parts.append(d)
+        d = np.vstack(parts)
+    else:
+        tree = cKDTree(tissue.all_xy)
+        d, _ = tree.query(fd["xy"], k=max(KS) + 1)
     s = float(np.median(d[:, 1]))
     return s, {k: float(np.median(d[:, k])) for k in KS}
 

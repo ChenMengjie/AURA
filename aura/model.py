@@ -635,6 +635,12 @@ def _neighborhood_spec(k, radius, rings):
 def _drop_sparse_cells(n_nbrs, min_neighbors):
     cell_mask = (n_nbrs >= min_neighbors).all(axis=1)
     n_drop = (~cell_mask).sum()
+    if n_drop == len(cell_mask):
+        raise ValueError(
+            f"All {len(cell_mask)} focal cells have < {min_neighbors} neighbors "
+            "in some neighborhood block; the radius/rings are too small for "
+            "this dataset's cell spacing (check coordinate units and, for "
+            "multi-sample data, measure spacing within samples)")
     if n_drop:
         log.warning("Excluding %d of %d focal cells with < %d neighbors in "
                     "some neighborhood block", n_drop, len(cell_mask),

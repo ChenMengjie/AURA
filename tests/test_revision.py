@@ -288,3 +288,16 @@ def test_spatial_trend_multisample_runs():
     r = run_model_multisample(counts, focal_xy, all_xy, all_types, fs, alls,
                               k=10, n_perm=50, spatial_trend=150)
     assert np.isfinite(r['pvalues']).all()
+
+
+def test_drop_sparse_cells_raises_when_all_excluded():
+    """A radius smaller than the cell spacing must fail loudly, not with an
+    opaque min()-of-empty-sequence error downstream."""
+    import numpy as np
+    import pytest
+    from aura.model import _drop_sparse_cells
+    n_nbrs = np.zeros((20, 3), dtype=int)
+    with pytest.raises(ValueError, match="All 20 focal cells"):
+        _drop_sparse_cells(n_nbrs, min_neighbors=3)
+    n_nbrs[0] = 5
+    assert _drop_sparse_cells(n_nbrs, min_neighbors=3).sum() == 1
