@@ -1,0 +1,10 @@
+{
+  "title": "AURA: composition-dependent context variance model for spatial transcriptomics",
+  "upload_type": "software",
+  "description": "AURA tests and quantifies how gene expression in a focal cell type depends on the continuous composition of its local neighborhood in single-cell-resolution spatial transcriptomics data (Xenium, CosMx, cell-segmented Visium HD), separating this from cell-level transcriptional output and flagging transcript spillover. This release (v0.2.0) is the version used in the Genome Biology revision and includes the scripts that reproduce all revision analyses.",
+  "creators": [
+    {"name": "Chen, Mengjie", "affiliation": "University of Chicago"}
+  ],
+  "license": "MIT",
+  "keywords": ["spatial transcriptomics", "microenvironment", "cell composition", "variance decomposition", "permutation test"]
+}

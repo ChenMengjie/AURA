@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.2.0 (unreleased)
+## 0.2.0 (2026-10-08)
 
 ### Changed
 - `R2_total` is now the share of each gene's count variance captured by the
